@@ -106,6 +106,8 @@ const CONTACT_EMAIL = "alessandrotedeschi2007@gmail.com"
 const CONTACT_SUBJECT = "Richiesta versione personalizzata QuoteFlow"
 const CONTACT_BODY = "Ciao, ho visto la demo di QuoteFlow e vorrei avere maggiori informazioni su una versione personalizzata per la mia azienda."
 const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}&body=${encodeURIComponent(CONTACT_BODY)}`
+// Replace this placeholder before publishing with your real contact address.
+const CONTACT_EMAIL = "alessandrotedeschi2007@gmail.com"
 const money = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" })
 const number = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 })
 
