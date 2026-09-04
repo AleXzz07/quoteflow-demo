@@ -103,7 +103,7 @@ type View = "dashboard" | "quotes" | "editor" | "clients" | "catalogs" | "settin
 
 const STORAGE_KEY = "quoteflow-demo-v2"
 // Replace this placeholder before publishing with your real contact address.
-const CONTACT_EMAIL = "YOUR_EMAIL@example.com"
+const CONTACT_EMAIL = "alessandrotedeschi2007@gmail.com"
 const money = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" })
 const number = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 })
 
