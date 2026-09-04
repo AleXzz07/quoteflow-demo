@@ -102,8 +102,10 @@ import { Toaster } from "@/components/ui/sonner"
 type View = "dashboard" | "quotes" | "editor" | "clients" | "catalogs" | "settings"
 
 const STORAGE_KEY = "quoteflow-demo-v2"
-// Replace this placeholder before publishing with your real contact address.
-const CONTACT_EMAIL = "YOUR_EMAIL@example.com"
+const CONTACT_EMAIL = "alessandrotedeschi2007@gmail.com"
+const CONTACT_SUBJECT = "Richiesta versione personalizzata QuoteFlow"
+const CONTACT_BODY = "Ciao, ho visto la demo di QuoteFlow e vorrei avere maggiori informazioni su una versione personalizzata per la mia azienda."
+const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}&body=${encodeURIComponent(CONTACT_BODY)}`
 const money = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" })
 const number = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 })
 
@@ -395,11 +397,16 @@ export default function QuoteFlowApp() {
 
         <div className="mx-auto w-full max-w-[1600px] px-4 pt-4 md:px-7 md:pt-6">
           <div className="flex flex-col gap-3 rounded-xl border border-[#b9d7da] bg-gradient-to-r from-[#eaf5f5] to-white px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-semibold text-[#0b3d45]">
-              Vuoi una versione personalizzata per la tua azienda?
-            </p>
+            <div>
+              <p className="text-sm font-semibold text-[#0b3d45]">
+                Vuoi una versione personalizzata per la tua azienda?
+              </p>
+              <a href={CONTACT_MAILTO} className="mt-1 inline-block text-xs text-[#14727d] underline-offset-2 hover:underline">
+                {CONTACT_EMAIL}
+              </a>
+            </div>
             <Button asChild size="sm" className="w-full bg-[#0b3d45] text-white hover:bg-[#12525c] sm:w-auto">
-              <a href={`mailto:${CONTACT_EMAIL}?subject=Richiesta%20versione%20personalizzata%20QuoteFlow`} data-demo-contact>
+              <a href={CONTACT_MAILTO} data-demo-contact>
                 <Mail /> Contattami
               </a>
             </Button>
