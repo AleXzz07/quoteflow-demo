@@ -106,6 +106,7 @@ const CONTACT_EMAIL = "alessandrotedeschi2007@gmail.com"
 const CONTACT_SUBJECT = "Richiesta versione personalizzata QuoteFlow"
 const CONTACT_BODY = "Ciao, ho visto la demo di QuoteFlow e vorrei avere maggiori informazioni su una versione personalizzata per la mia azienda."
 const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}&body=${encodeURIComponent(CONTACT_BODY)}`
+const CONTACT_GMAIL = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(CONTACT_EMAIL)}&su=${encodeURIComponent(CONTACT_SUBJECT)}&body=${encodeURIComponent(CONTACT_BODY)}`
 const money = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" })
 const number = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 })
 
@@ -195,6 +196,7 @@ export default function QuoteFlowApp() {
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null)
   const [pdfQuote, setPdfQuote] = useState<Quote | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const [pendingNavigation, setPendingNavigation] = useState<View | "new" | null>(null)
   const [quoteToDelete, setQuoteToDelete] = useState<Quote | null>(null)
   const [clientDialog, setClientDialog] = useState<{ open: boolean; client: Client | null; selectAfterSave: boolean }>({ open: false, client: null, selectAfterSave: false })
@@ -321,6 +323,27 @@ export default function QuoteFlowApp() {
     navigate("dashboard")
   }
 
+  const copyContactEmail = async () => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(CONTACT_EMAIL)
+      } else {
+        const textarea = document.createElement("textarea")
+        textarea.value = CONTACT_EMAIL
+        textarea.style.position = "fixed"
+        textarea.style.opacity = "0"
+        document.body.appendChild(textarea)
+        textarea.select()
+        const copied = document.execCommand("copy")
+        textarea.remove()
+        if (!copied) throw new Error("Copia non disponibile")
+      }
+      toast.success("Email copiata")
+    } catch {
+      toast.error("Impossibile copiare l'email")
+    }
+  }
+
   const navItems = [
     { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
     { id: "quotes" as const, label: "Preventivi", icon: FileText },
@@ -401,14 +424,12 @@ export default function QuoteFlowApp() {
               <p className="text-sm font-semibold text-[#0b3d45]">
                 Vuoi una versione personalizzata per la tua azienda?
               </p>
-              <a href={CONTACT_MAILTO} className="mt-1 inline-block text-xs text-[#14727d] underline-offset-2 hover:underline">
+              <button type="button" onClick={() => setContactOpen(true)} className="mt-1 inline-block cursor-pointer text-left text-xs text-[#14727d] underline-offset-2 hover:underline">
                 {CONTACT_EMAIL}
-              </a>
+              </button>
             </div>
-            <Button asChild size="sm" className="w-full bg-[#0b3d45] text-white hover:bg-[#12525c] sm:w-auto">
-              <a href={CONTACT_MAILTO} data-demo-contact>
-                <Mail /> Contattami
-              </a>
+            <Button type="button" size="sm" onClick={() => setContactOpen(true)} className="w-full bg-[#0b3d45] text-white hover:bg-[#12525c] sm:w-auto" data-demo-contact>
+              <Mail /> Contattami
             </Button>
           </div>
         </div>
@@ -460,6 +481,33 @@ export default function QuoteFlowApp() {
         }}
       />
       {clientDialog.open && <ClientFormDialog open client={clientDialog.client} onClose={() => setClientDialog({ open: false, client: null, selectAfterSave: false })} onSave={saveClient} />}
+      <Dialog open={contactOpen} onOpenChange={setContactOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Contatta QuoteFlow</DialogTitle>
+            <DialogDescription>Scegli come inviare la tua richiesta. L'oggetto e il messaggio sono già pronti.</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-xl border border-[#b9d7da] bg-[#f2f8f8] px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Email</p>
+            <p className="mt-1 break-all text-sm font-semibold text-[#0b3d45]">{CONTACT_EMAIL}</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Button type="button" variant="outline" onClick={copyContactEmail}>
+              <Copy /> Copia email
+            </Button>
+            <Button asChild variant="outline">
+              <a href={CONTACT_MAILTO}>
+                <Mail /> Apri app email
+              </a>
+            </Button>
+            <Button asChild className="bg-[#0b3d45] text-white hover:bg-[#12525c]">
+              <a href={CONTACT_GMAIL} target="_blank" rel="noreferrer">
+                <Mail /> Apri Gmail
+              </a>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={Boolean(quoteToDelete)} onOpenChange={(open) => !open && setQuoteToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Eliminare il preventivo?</AlertDialogTitle><AlertDialogDescription>{quoteToDelete?.number} verrà rimosso dallo storico locale. Questa operazione non può essere annullata.</AlertDialogDescription></AlertDialogHeader>
