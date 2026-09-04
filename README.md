@@ -4,6 +4,10 @@ Demo commerciale di un'applicazione web per la gestione dei preventivi di piccol
 
 L'app funziona interamente nel browser e salva i dati in `localStorage`: non richiede backend, database o variabili d'ambiente.
 
+## Impostare il contatto della CTA
+
+Prima della pubblicazione, aprire `components/quote-flow-app.tsx` e sostituire il valore di `CONTACT_EMAIL` con il proprio indirizzo email. Il valore incluso nel progetto usa il dominio riservato `example.com` ed è soltanto un placeholder.
+
 ## 1. Installare le dipendenze
 
 Requisiti: Node.js 20.19 o successivo e npm.

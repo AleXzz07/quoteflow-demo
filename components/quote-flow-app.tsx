@@ -19,6 +19,7 @@ import {
   FilterX,
   LayoutDashboard,
   ListChecks,
+  Mail,
   PackageSearch,
   PencilLine,
   Plus,
@@ -100,7 +101,9 @@ import { Toaster } from "@/components/ui/sonner"
 
 type View = "dashboard" | "quotes" | "editor" | "clients" | "catalogs" | "settings"
 
-const STORAGE_KEY = "quoteflow-demo-v1"
+const STORAGE_KEY = "quoteflow-demo-v2"
+// Replace this placeholder before publishing with your real contact address.
+const CONTACT_EMAIL = "YOUR_EMAIL@example.com"
 const money = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" })
 const number = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 1 })
 
@@ -333,6 +336,9 @@ export default function QuoteFlowApp() {
             <div className="min-w-0 leading-tight group-data-[collapsible=icon]:hidden">
               <p className="truncate text-base font-bold tracking-tight">QuoteFlow</p>
               <p className="truncate text-xs text-cyan-100/70">Preventivi industriali</p>
+              <Badge variant="outline" className="mt-2 border-white/20 bg-white/10 text-[11px] font-semibold text-cyan-50">
+                Demo commerciale
+              </Badge>
             </div>
           </div>
         </SidebarHeader>
@@ -387,7 +393,20 @@ export default function QuoteFlowApp() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1600px] p-4 md:p-7">
+        <div className="mx-auto w-full max-w-[1600px] px-4 pt-4 md:px-7 md:pt-6">
+          <div className="flex flex-col gap-3 rounded-xl border border-[#b9d7da] bg-gradient-to-r from-[#eaf5f5] to-white px-4 py-3.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold text-[#0b3d45]">
+              Vuoi una versione personalizzata per la tua azienda?
+            </p>
+            <Button asChild size="sm" className="w-full bg-[#0b3d45] text-white hover:bg-[#12525c] sm:w-auto">
+              <a href={`mailto:${CONTACT_EMAIL}?subject=Richiesta%20versione%20personalizzata%20QuoteFlow`} data-demo-contact>
+                <Mail /> Contattami
+              </a>
+            </Button>
+          </div>
+        </div>
+
+        <main className="mx-auto w-full max-w-[1600px] p-4 md:p-7 md:pt-5">
           {view === "dashboard" && <Dashboard state={state} onNew={startNewQuote} onOpen={setSelectedQuote} />}
           {view === "quotes" && <QuotesPage state={state} onOpen={setSelectedQuote} onNew={startNewQuote} />}
           {view === "editor" && editorQuote && (
@@ -406,6 +425,9 @@ export default function QuoteFlowApp() {
           {view === "catalogs" && <CatalogsPage state={state} setState={setState} />}
           {view === "settings" && <SettingsPage state={state} setState={setState} onReset={resetDemo} />}
         </main>
+        <footer className="mx-auto w-full max-w-[1600px] px-4 pb-5 text-center text-xs leading-5 text-slate-500 md:px-7 md:pb-7">
+          I dati presenti sono dimostrativi e vengono salvati solo localmente nel browser.
+        </footer>
       </SidebarInset>
 
       <QuoteDetailDialog
@@ -492,7 +514,7 @@ function Dashboard({ state, onNew, onOpen }: { state: QuoteFlowState; onNew: () 
     <>
       <PageHeading
         eyebrow="Panoramica commerciale"
-        title="Buongiorno, FerroLab"
+        title={`Buongiorno, ${state.settings.companyName}`}
         description="Controlla il portafoglio preventivi e intervieni subito sulle offerte meno redditizie."
         action={<Button onClick={onNew} className="bg-[#0b3d45] hover:bg-[#12525c]"><FilePlus2 /> Crea preventivo</Button>}
       />
@@ -914,7 +936,7 @@ function CostRowLight({ label, value, strong }: { label: string; value: number; 
 }
 
 function AiImportDialog({ open, state, onClose, onApply }: { open: boolean; state: QuoteFlowState; onClose: () => void; onApply: (quote: Quote) => void }) {
-  const example = `Da: Laura Neri <l.neri@emilpack.it>\nOggetto: Richiesta offerta protezioni linea P8\n\nBuongiorno, avremmo bisogno di un'offerta per 16 pezzi di carter in acciaio inox AISI 304 spessore 2 mm. Sono richiesti taglio laser, piegatura e satinatura. La consegna ideale sarebbe entro fine ottobre. In allegato troverete il disegno aggiornato.\n\nGrazie,\nLaura Neri\nEmilpack S.p.A.`
+  const example = `Da: Referente Demo <referente2@example.com>\nOggetto: Richiesta offerta protezioni linea P8\n\nBuongiorno, avremmo bisogno di un'offerta per 16 pezzi di carter in acciaio inox AISI 304 spessore 2 mm. Sono richiesti taglio laser, piegatura e satinatura. La consegna ideale sarebbe entro fine ottobre. In allegato troverete il disegno aggiornato.\n\nGrazie,\nReferente Demo\nBeta Demo Packaging S.p.A.`
   const [email, setEmail] = useState(example)
   const [parsed, setParsed] = useState<{ clientId: string; description: string; quantity: number; material: string; processes: string; notes: string } | null>(null)
 
