@@ -1,4 +1,5 @@
 export type QuoteStatus = "Bozza" | "Inviato" | "Accettato" | "Rifiutato"
+export type ProcessCategory = "Macchina" | "Manodopera" | "Esterna"
 
 export type Client = {
   id: string
@@ -17,6 +18,7 @@ export type QuoteLine = {
   unit: string
   material: string
   processes: string
+  operations: QuoteOperation[]
   materialCost: number
   machineHours: number
   machineRate: number
@@ -24,6 +26,16 @@ export type QuoteLine = {
   laborRate: number
   externalCost: number
   extraCost: number
+}
+
+export type QuoteOperation = {
+  id: string
+  processId: string
+  name: string
+  category: ProcessCategory
+  unit: string
+  quantity: number
+  rate: number
 }
 
 export type Quote = {
@@ -52,7 +64,7 @@ export type MaterialRate = {
 export type ProcessRate = {
   id: string
   name: string
-  category: "Macchina" | "Manodopera" | "Esterna"
+  category: ProcessCategory
   unit: string
   price: number
 }
@@ -101,14 +113,23 @@ export type QuoteTotals = {
 export const calculateQuote = (quote: Pick<Quote, "lines" | "markup" | "vat">): QuoteTotals => {
   const material = quote.lines.reduce((sum, line) => sum + Number(line.materialCost || 0), 0)
   const machine = quote.lines.reduce(
-    (sum, line) => sum + Number(line.machineHours || 0) * Number(line.machineRate || 0),
+    (sum, line) => sum + (Array.isArray(line.operations)
+      ? line.operations.filter((operation) => operation.category === "Macchina").reduce((total, operation) => total + Number(operation.quantity || 0) * Number(operation.rate || 0), 0)
+      : Number(line.machineHours || 0) * Number(line.machineRate || 0)),
     0,
   )
   const labor = quote.lines.reduce(
-    (sum, line) => sum + Number(line.laborHours || 0) * Number(line.laborRate || 0),
+    (sum, line) => sum + (Array.isArray(line.operations)
+      ? line.operations.filter((operation) => operation.category === "Manodopera").reduce((total, operation) => total + Number(operation.quantity || 0) * Number(operation.rate || 0), 0)
+      : Number(line.laborHours || 0) * Number(line.laborRate || 0)),
     0,
   )
-  const external = quote.lines.reduce((sum, line) => sum + Number(line.externalCost || 0), 0)
+  const external = quote.lines.reduce(
+    (sum, line) => sum + (Array.isArray(line.operations)
+      ? line.operations.filter((operation) => operation.category === "Esterna").reduce((total, operation) => total + Number(operation.quantity || 0) * Number(operation.rate || 0), 0)
+      : Number(line.externalCost || 0)),
+    0,
+  )
   const extra = quote.lines.reduce((sum, line) => sum + Number(line.extraCost || 0), 0)
   const cost = material + machine + labor + external + extra
   const sale = cost * (1 + Number(quote.markup || 0) / 100)

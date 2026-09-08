@@ -37,15 +37,18 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { toast } from "sonner"
 
 import { DEMO_STATE } from "@/lib/demo-data"
+import { matchClientFromRequest, normalizeMatchText } from "@/lib/request-matching"
 import {
   calculateQuote,
   suggestedPriceForMargin,
   type Client,
   type MaterialRate,
+  type ProcessCategory,
   type ProcessRate,
   type Quote,
   type QuoteFlowState,
   type QuoteLine,
+  type QuoteOperation,
   type QuoteStatus,
 } from "@/lib/quoteflow-types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -152,6 +155,7 @@ function newLine(settings: QuoteFlowState["settings"]): QuoteLine {
     unit: "pz",
     material: "S235JR",
     processes: "",
+    operations: [],
     materialCost: 0,
     machineHours: 0,
     machineRate: settings.defaultMachineRate,
@@ -160,6 +164,10 @@ function newLine(settings: QuoteFlowState["settings"]): QuoteLine {
     externalCost: 0,
     extraCost: 0,
   }
+}
+
+function newOperation(): QuoteOperation {
+  return { id: uid(), processId: "", name: "", category: "Macchina", unit: "€/h", quantity: 1, rate: 0 }
 }
 
 function newQuote(state: QuoteFlowState): Quote {
@@ -187,6 +195,24 @@ function emptyClient(): Client {
   return { id: uid(), company: "", contact: "", email: "", phone: "", city: "", vatNumber: "" }
 }
 
+const operationCost = (operation: QuoteOperation) => Number(operation.quantity || 0) * Number(operation.rate || 0)
+const lineProcessSummary = (line: QuoteLine) => Array.isArray(line.operations) ? line.operations.map((operation) => operation.name).filter(Boolean).join(", ") : line.processes
+const operationQuantityLabel = (unit: string) => unit.toLowerCase().includes("/h") ? "Ore" : unit.toLowerCase().includes("lotto") ? "Lotti" : "Quantità"
+
+const legacyOperations = (line: QuoteLine): QuoteOperation[] => {
+  if (Array.isArray(line.operations)) return line.operations
+  const operations: QuoteOperation[] = []
+  if (line.machineHours) operations.push({ id: uid(), processId: "", name: "Lavorazioni macchina", category: "Macchina", unit: "€/h", quantity: line.machineHours, rate: line.machineRate })
+  if (line.laborHours) operations.push({ id: uid(), processId: "", name: "Manodopera", category: "Manodopera", unit: "€/h", quantity: line.laborHours, rate: line.laborRate })
+  if (line.externalCost) operations.push({ id: uid(), processId: "", name: "Lavorazioni esterne", category: "Esterna", unit: "€/lotto", quantity: 1, rate: line.externalCost })
+  return operations
+}
+
+const normalizeState = (value: QuoteFlowState): QuoteFlowState => ({
+  ...value,
+  quotes: value.quotes.map((quote) => ({ ...quote, lines: quote.lines.map((line) => ({ ...line, operations: legacyOperations(line) })) })),
+})
+
 export default function QuoteFlowApp() {
   const [state, setState] = useState<QuoteFlowState>(() => cloneDemo())
   const [hydrated, setHydrated] = useState(false)
@@ -207,7 +233,7 @@ export default function QuoteFlowApp() {
         const saved = window.localStorage.getItem(STORAGE_KEY)
         if (saved) {
           const parsed = JSON.parse(saved) as QuoteFlowState
-          setState({ ...parsed, settings: { ...DEMO_STATE.settings, ...parsed.settings } })
+          setState(normalizeState({ ...parsed, settings: { ...DEMO_STATE.settings, ...parsed.settings } }))
         }
       } catch {
         toast.error("I dati locali non sono stati caricati")
@@ -290,7 +316,7 @@ export default function QuoteFlowApp() {
     duplicate.markup = source.markup
     duplicate.vat = source.vat
     duplicate.notes = source.notes
-    duplicate.lines = source.lines.map((line) => ({ ...line, id: uid() }))
+    duplicate.lines = source.lines.map((line) => ({ ...line, id: uid(), operations: line.operations.map((operation) => ({ ...operation, id: uid() })) }))
     setSelectedQuote(null)
     setEditorQuote(duplicate)
     setEditorBaseline(JSON.stringify(duplicate))
@@ -727,6 +753,19 @@ function QuoteEditor({ quote, state, onChange, onCancel, onSave, onAi, onPreview
   const patchLine = (id: string, next: Partial<QuoteLine>) => patch("lines", quote.lines.map((line) => line.id === id ? { ...line, ...next } : line))
   const addLine = () => patch("lines", [...quote.lines, newLine(state.settings)])
   const removeLine = (id: string) => quote.lines.length > 1 && patch("lines", quote.lines.filter((line) => line.id !== id))
+  const setMaterial = (lineId: string, value: string) => {
+    const selected = state.materials.find((material) => normalizeMatchText(material.name) === normalizeMatchText(value))
+    patchLine(lineId, { material: value, ...(selected ? { materialCost: selected.price } : {}) })
+  }
+  const addOperation = (lineId: string) => patch("lines", quote.lines.map((line) => line.id === lineId ? { ...line, operations: [...line.operations, newOperation()] } : line))
+  const patchOperation = (lineId: string, operationId: string, next: Partial<QuoteOperation>) => patch("lines", quote.lines.map((line) => line.id === lineId ? { ...line, operations: line.operations.map((operation) => operation.id === operationId ? { ...operation, ...next } : operation) } : line))
+  const setOperation = (lineId: string, operation: QuoteOperation, value: string) => {
+    const selected = state.processes.find((process) => normalizeMatchText(process.name) === normalizeMatchText(value))
+    patchOperation(lineId, operation.id, selected
+      ? { processId: selected.id, name: selected.name, category: selected.category, unit: selected.unit, rate: selected.price }
+      : { processId: "", name: value })
+  }
+  const removeOperation = (lineId: string, operationId: string) => patch("lines", quote.lines.map((line) => line.id === lineId ? { ...line, operations: line.operations.filter((operation) => operation.id !== operationId) } : line))
 
   return (
     <>
@@ -766,16 +805,22 @@ function QuoteEditor({ quote, state, onChange, onCancel, onSave, onAi, onPreview
                     <div className="md:col-span-2 xl:col-span-3"><Field label="Descrizione"><Input value={line.description} onChange={(e) => patchLine(line.id, { description: e.target.value })} placeholder="Es. Carter inox piegato" /></Field></div>
                     <Field label="Quantità"><Input type="number" min="1" value={line.quantity} onChange={(e) => patchLine(line.id, { quantity: Number(e.target.value) })} /></Field>
                     <Field label="Unità"><Input value={line.unit} onChange={(e) => patchLine(line.id, { unit: e.target.value })} /></Field>
-                    <div className="md:col-span-2 xl:col-span-1"><Field label="Materiale"><Input value={line.material} onChange={(e) => patchLine(line.id, { material: e.target.value })} list="materials" /><datalist id="materials">{state.materials.map((material) => <option key={material.id} value={material.name} />)}</datalist></Field></div>
-                    <div className="md:col-span-2 xl:col-span-3"><Field label="Lavorazioni"><Input value={line.processes} onChange={(e) => patchLine(line.id, { processes: e.target.value })} placeholder="Taglio laser, piegatura, saldatura…" /></Field></div>
-                    <Field label="Materiale €" hint="Costo totale"><MoneyInput value={line.materialCost} onChange={(value) => patchLine(line.id, { materialCost: value })} /></Field>
-                    <Field label="Ore macchina"><NumberInput value={line.machineHours} onChange={(value) => patchLine(line.id, { machineHours: value })} /></Field>
-                    <Field label="Macchina €/h"><MoneyInput value={line.machineRate} onChange={(value) => patchLine(line.id, { machineRate: value })} /></Field>
-                    <Field label="Ore manodopera"><NumberInput value={line.laborHours} onChange={(value) => patchLine(line.id, { laborHours: value })} /></Field>
-                    <Field label="Manodopera €/h"><MoneyInput value={line.laborRate} onChange={(value) => patchLine(line.id, { laborRate: value })} /></Field>
-                    <Field label="Lavorazioni esterne €"><MoneyInput value={line.externalCost} onChange={(value) => patchLine(line.id, { externalCost: value })} /></Field>
-                    <Field label="Costi aggiuntivi €"><MoneyInput value={line.extraCost} onChange={(value) => patchLine(line.id, { extraCost: value })} /></Field>
+                    <div className="md:col-span-2 xl:col-span-4"><Field label="Materiale" hint="Cerca nel listino o inserisci un materiale personalizzato."><Input value={line.material} onChange={(e) => setMaterial(line.id, e.target.value)} list={`materials-${line.id}`} placeholder="Cerca materiale…" /><datalist id={`materials-${line.id}`}>{state.materials.map((material) => <option key={material.id} value={material.name}>{money.format(material.price)} · {material.unit}</option>)}</datalist></Field></div>
+                    <div className="md:col-span-2 xl:col-span-2"><Field label="Costo materiale €" hint="Precompilato dal listino, sempre modificabile."><MoneyInput value={line.materialCost} onChange={(value) => patchLine(line.id, { materialCost: value })} /></Field></div>
                   </div>
+                  <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+                    <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-sm font-bold text-slate-900">Lavorazioni</p><p className="text-xs text-slate-500">Tariffe recuperate dal listino e modificabili.</p></div><Button type="button" size="sm" variant="outline" onClick={() => addOperation(line.id)}><Plus /> Aggiungi lavorazione</Button></div>
+                    {line.operations.length ? <div className="space-y-2.5">{line.operations.map((operation) => (
+                      <div key={operation.id} className="grid items-end gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,2fr)_minmax(100px,0.8fr)_minmax(110px,0.9fr)_minmax(110px,0.9fr)_40px]">
+                        <Field label="Lavorazione"><Input value={operation.name} onChange={(e) => setOperation(line.id, operation, e.target.value)} list={`processes-${line.id}-${operation.id}`} placeholder="Cerca nel listino…" /><datalist id={`processes-${line.id}-${operation.id}`}>{state.processes.map((process) => <option key={process.id} value={process.name}>{money.format(process.price)} · {process.unit}</option>)}</datalist></Field>
+                        <Field label={operationQuantityLabel(operation.unit)}><NumberInput value={operation.quantity} onChange={(quantity) => patchOperation(line.id, operation.id, { quantity })} /></Field>
+                        <Field label={`Tariffa ${operation.unit}`}><MoneyInput value={operation.rate} onChange={(rate) => patchOperation(line.id, operation.id, { rate })} /></Field>
+                        <div><p className="mb-2 text-sm font-medium text-slate-700">Costo</p><div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 font-mono text-sm font-semibold text-slate-900">{money.format(operationCost(operation))}</div></div>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeOperation(line.id, operation.id)} className="text-slate-400 hover:text-rose-600" aria-label={`Elimina ${operation.name || "lavorazione"}`}><Trash2 /></Button>
+                      </div>
+                    ))}</div> : <button type="button" onClick={() => addOperation(line.id)} className="w-full rounded-lg border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 transition hover:border-[#14727d] hover:bg-white hover:text-[#0b3d45]">+ Aggiungi la prima lavorazione</button>}
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Costi aggiuntivi €"><MoneyInput value={line.extraCost} onChange={(value) => patchLine(line.id, { extraCost: value })} /></Field></div>
                   <div className="mt-4 flex justify-end border-t border-slate-100 pt-3 text-sm"><span className="text-slate-500">Costo voce</span><strong className="ml-3 text-slate-950">{money.format(calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost)}</strong></div>
                 </div>
               ))}
@@ -978,7 +1023,7 @@ function QuoteDetailDialog({ quote, state, onClose, onEdit, onDuplicate, onDelet
       <DialogContent className="max-h-[92vh] overflow-auto sm:max-w-3xl">
         <DialogHeader><div className="flex flex-wrap items-center gap-2"><StatusBadge status={quote.status} /><span className="text-xs font-bold uppercase tracking-wider text-slate-400">{quote.number}</span></div><DialogTitle className="pt-2 text-2xl">{quote.title}</DialogTitle><DialogDescription>{client?.company} · emesso il {formatDate(quote.date)}</DialogDescription></DialogHeader>
         <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3"><Info label="Cliente" value={client?.company ?? "—"} /><Info label="Referente" value={client?.contact ?? "—"} /><Info label="Validità" value={formatDate(quote.validUntil)} /></div>
-        <div className="overflow-x-auto rounded-xl border border-slate-200"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>Voce</TableHead><TableHead>Q.tà</TableHead><TableHead>Materiale</TableHead><TableHead className="text-right">Costo</TableHead></TableRow></TableHeader><TableBody>{quote.lines.map((line) => <TableRow key={line.id}><TableCell><p className="font-semibold">{line.description}</p><p className="text-xs text-slate-500">{line.processes}</p></TableCell><TableCell>{line.quantity} {line.unit}</TableCell><TableCell>{line.material}</TableCell><TableCell className="text-right font-semibold">{money.format(calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost)}</TableCell></TableRow>)}</TableBody></Table></div>
+        <div className="overflow-x-auto rounded-xl border border-slate-200"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>Voce</TableHead><TableHead>Q.tà</TableHead><TableHead>Materiale</TableHead><TableHead className="text-right">Costo</TableHead></TableRow></TableHeader><TableBody>{quote.lines.map((line) => <TableRow key={line.id}><TableCell><p className="font-semibold">{line.description}</p><p className="text-xs text-slate-500">{lineProcessSummary(line)}</p></TableCell><TableCell>{line.quantity} {line.unit}</TableCell><TableCell>{line.material}</TableCell><TableCell className="text-right font-semibold">{money.format(calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost)}</TableCell></TableRow>)}</TableBody></Table></div>
         <div className="ml-auto w-full max-w-sm space-y-3 rounded-xl bg-[#0b3d45] p-5 text-white"><CostRowLight label="Costo totale" value={totals.cost} /><CostRowLight label="Prezzo vendita" value={totals.sale} /><CostRowLight label={`Margine ${number.format(totals.marginPercent)}%`} value={totals.marginValue} /><div className="border-t border-white/15 pt-3"><CostRowLight label="Totale cliente" value={totals.customerTotal} strong /></div></div>
         <DialogFooter className="sm:justify-between"><Button variant="ghost" onClick={() => onDelete(quote)} className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"><Trash2 /> Elimina</Button><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button variant="outline" onClick={onClose}>Chiudi</Button><Button variant="outline" onClick={() => onDuplicate(quote)}><Copy /> Duplica</Button><Button variant="outline" onClick={() => onEdit(quote)}><PencilLine /> Modifica</Button><Button onClick={() => onPdf(quote)} className="bg-[#0b3d45] hover:bg-[#12525c]"><FileDown /> PDF</Button></div></DialogFooter>
       </DialogContent>
@@ -993,22 +1038,32 @@ function CostRowLight({ label, value, strong }: { label: string; value: number; 
 function AiImportDialog({ open, state, onClose, onApply }: { open: boolean; state: QuoteFlowState; onClose: () => void; onApply: (quote: Quote) => void }) {
   const example = `Da: Referente Demo <referente2@example.com>\nOggetto: Richiesta offerta protezioni linea P8\n\nBuongiorno, avremmo bisogno di un'offerta per 16 pezzi di carter in acciaio inox AISI 304 spessore 2 mm. Sono richiesti taglio laser, piegatura e satinatura. La consegna ideale sarebbe entro fine ottobre. In allegato troverete il disegno aggiornato.\n\nGrazie,\nReferente Demo\nBeta Demo Packaging S.p.A.`
   const [email, setEmail] = useState(example)
-  const [parsed, setParsed] = useState<{ clientId: string; description: string; quantity: number; material: string; processes: string; notes: string } | null>(null)
+  const [parsed, setParsed] = useState<{ clientId: string; description: string; quantity: number; material: string; materialCost: number; operations: QuoteOperation[]; notes: string } | null>(null)
 
   const analyze = () => {
     const lower = email.toLowerCase()
-    const client = state.clients.find((item) => lower.includes(item.company.toLowerCase().replace(" s.p.a.", "").replace(" s.r.l.", "")) || lower.includes(item.email.split("@")[1]))
+    const client = matchClientFromRequest(email, state.clients)
     const qty = email.match(/(\d+)\s*(?:pezzi|pz|unit[aà])/i)
     const materials = ["AISI 316L", "AISI 304", "S355J2", "S235JR", "Alluminio 6082"]
-    const material = materials.find((item) => lower.includes(item.toLowerCase())) ?? "Da verificare"
+    const detectedMaterial = materials.find((item) => lower.includes(item.toLowerCase()))
+    const catalogMaterial = detectedMaterial ? state.materials.find((item) => normalizeMatchText(item.name).includes(normalizeMatchText(detectedMaterial))) : undefined
+    const material = catalogMaterial?.name ?? detectedMaterial ?? "Da verificare"
     const processOptions = ["taglio laser", "piegatura", "saldatura TIG", "saldatura MIG", "satinatura", "verniciatura", "fresatura"]
-    const processes = processOptions.filter((item) => lower.includes(item.toLowerCase()))
+    const detectedProcesses = processOptions.filter((item) => lower.includes(item.toLowerCase()))
+    const operations = detectedProcesses.map((detected) => {
+      const normalizedDetected = normalizeMatchText(detected)
+      const process = state.processes.find((item) => normalizeMatchText(item.name).includes(normalizedDetected) || normalizedDetected.includes(normalizeMatchText(item.name)))
+      return process
+        ? { id: uid(), processId: process.id, name: process.name, category: process.category, unit: process.unit, quantity: 1, rate: process.price }
+        : { id: uid(), processId: "", name: detected[0].toUpperCase() + detected.slice(1), category: "Macchina" as ProcessCategory, unit: "€/h", quantity: 1, rate: 0 }
+    })
     setParsed({
-      clientId: client?.id ?? state.clients[0]?.id ?? "",
+      clientId: client?.id ?? "",
       description: email.match(/(?:offerta per|preventivo per)\s+([^\.\n]+)/i)?.[1]?.trim() ?? "Fornitura da richiesta cliente",
       quantity: qty ? Number(qty[1]) : 1,
       material,
-      processes: processes.length ? processes.map((item) => item[0].toUpperCase() + item.slice(1)).join(", ") : "Da verificare",
+      materialCost: catalogMaterial?.price ?? 0,
+      operations,
       notes: email.match(/(?:consegna|entro)\s+([^\.\n]+)/i)?.[0]?.trim() ?? "Verificare specifiche tecniche e tempi di consegna.",
     })
     toast.success("Richiesta analizzata", { description: "Controlla i campi evidenziati prima di procedere." })
@@ -1021,7 +1076,7 @@ function AiImportDialog({ open, state, onClose, onApply }: { open: boolean; stat
     quote.title = parsed.description.charAt(0).toUpperCase() + parsed.description.slice(1)
     quote.description = "Richiesta importata da email cliente; dati da verificare prima dell'invio."
     quote.notes = parsed.notes
-    quote.lines = [{ ...quote.lines[0], description: parsed.description, quantity: parsed.quantity, material: parsed.material, processes: parsed.processes }]
+    quote.lines = [{ ...quote.lines[0], description: parsed.description, quantity: parsed.quantity, material: parsed.material, materialCost: parsed.materialCost, processes: parsed.operations.map((operation) => operation.name).join(", "), operations: parsed.operations }]
     onApply(quote)
     setParsed(null)
   }
@@ -1034,16 +1089,16 @@ function AiImportDialog({ open, state, onClose, onApply }: { open: boolean; stat
           <div className="space-y-3"><Label>Email del cliente</Label><Textarea value={email} onChange={(e) => setEmail(e.target.value)} rows={15} className="font-mono text-sm leading-6" /><Button onClick={analyze} disabled={!email.trim()} className="w-full bg-[#0b3d45] hover:bg-[#12525c]"><Sparkles /> Analizza richiesta</Button></div>
           {parsed ? (
             <div className="space-y-4 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4">
-              <div className="flex items-center justify-between"><div><p className="font-semibold text-slate-900">Dati estratti</p><p className="text-xs text-slate-500">Modifica ciò che non è corretto.</p></div><Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Da verificare</Badge></div>
-              <Field label="Cliente"><Select value={parsed.clientId} onValueChange={(clientId) => setParsed({ ...parsed, clientId })}><SelectTrigger className="w-full bg-white"><SelectValue /></SelectTrigger><SelectContent>{state.clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>)}</SelectContent></Select></Field>
+              <div className="flex items-center justify-between"><div><p className="font-semibold text-slate-900">Dati estratti</p><p className="text-xs text-slate-500">Modifica ciò che non è corretto.</p></div><Badge variant="outline" className={parsed.clientId ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{parsed.clientId ? "Cliente riconosciuto" : "Cliente da verificare"}</Badge></div>
+              <Field label="Cliente"><Select value={parsed.clientId || "__verify__"} onValueChange={(clientId) => setParsed({ ...parsed, clientId: clientId === "__verify__" ? "" : clientId })}><SelectTrigger className={`w-full bg-white ${!parsed.clientId ? "border-amber-300 text-amber-800" : ""}`}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__verify__">Cliente da verificare</SelectItem>{state.clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.company}</SelectItem>)}</SelectContent></Select>{!parsed.clientId ? <p className="mt-1.5 text-xs font-medium text-amber-700">Seleziona il cliente corretto prima di continuare.</p> : null}</Field>
               <Field label="Descrizione"><Input value={parsed.description} onChange={(e) => setParsed({ ...parsed, description: e.target.value })} className="bg-white" /></Field>
-              <div className="grid grid-cols-2 gap-3"><Field label="Quantità"><NumberInput value={parsed.quantity} onChange={(quantity) => setParsed({ ...parsed, quantity })} /></Field><Field label="Materiale"><Input value={parsed.material} onChange={(e) => setParsed({ ...parsed, material: e.target.value })} className="bg-white" /></Field></div>
-              <Field label="Lavorazioni"><Input value={parsed.processes} onChange={(e) => setParsed({ ...parsed, processes: e.target.value })} className="bg-white" /></Field>
+              <div className="grid grid-cols-2 gap-3"><Field label="Quantità"><NumberInput value={parsed.quantity} onChange={(quantity) => setParsed({ ...parsed, quantity })} /></Field><Field label="Materiale"><Input value={parsed.material} onChange={(e) => { const value = e.target.value; const selected = state.materials.find((item) => normalizeMatchText(item.name) === normalizeMatchText(value)); setParsed({ ...parsed, material: value, ...(selected ? { materialCost: selected.price } : {}) }) }} list="import-materials" className="bg-white" /><datalist id="import-materials">{state.materials.map((material) => <option key={material.id} value={material.name} />)}</datalist></Field></div>
+              <Field label="Lavorazioni"><div className="flex min-h-10 flex-wrap gap-2 rounded-md border border-slate-200 bg-white p-2">{parsed.operations.length ? parsed.operations.map((operation) => <Badge key={operation.id} variant="outline" className="bg-slate-50 text-slate-700">{operation.name}</Badge>) : <span className="text-sm text-slate-500">Nessuna lavorazione riconosciuta</span>}</div></Field>
               <Field label="Note"><Textarea rows={3} value={parsed.notes} onChange={(e) => setParsed({ ...parsed, notes: e.target.value })} className="bg-white" /></Field>
             </div>
           ) : null}
         </div>
-        <DialogFooter><Button variant="outline" onClick={onClose}>Annulla</Button>{parsed ? <Button onClick={apply} className="bg-[#0b3d45] hover:bg-[#12525c]"><Check /> Usa nel preventivo</Button> : null}</DialogFooter>
+        <DialogFooter><Button variant="outline" onClick={onClose}>Annulla</Button>{parsed ? <Button disabled={!parsed.clientId} onClick={apply} className="bg-[#0b3d45] hover:bg-[#12525c]"><Check /> Usa nel preventivo</Button> : null}</DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -1086,7 +1141,7 @@ function PdfPreviewDialog({ quote, state, onClose }: { quote: Quote | null; stat
       const rowCost = calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost
       const rowSale = rowCost * (1 + quote.markup / 100)
       doc.setTextColor(15, 23, 42); doc.setFont("helvetica", "bold"); doc.text(line.description || "Voce preventivo", 19, y + 7)
-      doc.setFont("helvetica", "normal"); doc.setTextColor(100, 116, 139); doc.text(`${line.material} | ${line.processes}`, 19, y + 13)
+      doc.setFont("helvetica", "normal"); doc.setTextColor(100, 116, 139); doc.text(`${line.material} | ${lineProcessSummary(line)}`, 19, y + 13)
       doc.setTextColor(15, 23, 42); doc.text(`${line.quantity} ${line.unit}`, 126, y + 7); doc.text(money.format(rowSale), 190, y + 7, { align: "right" })
       doc.setDrawColor(226, 232, 240); doc.line(16, y + 17, 194, y + 17); y += 18
     })
@@ -1113,7 +1168,7 @@ function PdfPreviewDialog({ quote, state, onClose }: { quote: Quote | null; stat
           <div className="-mx-6 -mt-6 flex items-center justify-between bg-[#0b3d45] px-6 py-5 text-white sm:-mx-10 sm:-mt-10 sm:px-10"><div className="flex items-center gap-3">{state.settings.logoDataUrl ? <img src={state.settings.logoDataUrl} alt="Logo aziendale" className="size-10 rounded-lg bg-white object-contain p-1" /> : <div className="grid size-10 place-items-center rounded-lg bg-[#ffb454] font-black text-[#0b3d45]">{initials(state.settings.companyName)}</div>}<div><p className="font-bold">{state.settings.legalName}</p><p className="text-xs text-cyan-50/70">{state.settings.city} · {state.settings.vatNumber}</p></div></div><FileText className="hidden size-7 text-white/50 sm:block" /></div>
           <div className="mt-9 flex flex-col justify-between gap-5 sm:flex-row"><div><p className="text-2xl font-black tracking-tight text-slate-950">PREVENTIVO</p><p className="mt-1 text-xs text-slate-500">{quote.number} · {formatDate(quote.date)}</p></div><div className="rounded-lg bg-slate-50 p-4 text-sm sm:min-w-72"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">Cliente</p><p className="mt-1 font-bold text-slate-900">{client?.company}</p><p className="mt-1 text-xs leading-5 text-slate-500">{client?.contact}<br />{client?.email}<br />{client?.city}</p></div></div>
           <div className="mt-8"><h2 className="text-lg font-bold text-slate-950">{quote.title}</h2><p className="mt-1 text-sm leading-6 text-slate-500">{quote.description}</p></div>
-          <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead><tr className="bg-[#0b3d45] text-left text-xs uppercase tracking-wide text-white"><th className="p-3">Descrizione</th><th className="p-3">Quantità</th><th className="p-3 text-right">Prezzo</th></tr></thead><tbody>{quote.lines.map((line) => { const sale = calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost * (1 + quote.markup / 100); return <tr key={line.id} className="border-b border-slate-200"><td className="p-3"><p className="font-semibold text-slate-900">{line.description}</p><p className="mt-1 text-xs text-slate-500">{line.material} · {line.processes}</p></td><td className="p-3 text-slate-600">{line.quantity} {line.unit}</td><td className="p-3 text-right font-semibold">{money.format(sale)}</td></tr> })}</tbody></table></div>
+          <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead><tr className="bg-[#0b3d45] text-left text-xs uppercase tracking-wide text-white"><th className="p-3">Descrizione</th><th className="p-3">Quantità</th><th className="p-3 text-right">Prezzo</th></tr></thead><tbody>{quote.lines.map((line) => { const sale = calculateQuote({ lines: [line], markup: 0, vat: 0 }).cost * (1 + quote.markup / 100); return <tr key={line.id} className="border-b border-slate-200"><td className="p-3"><p className="font-semibold text-slate-900">{line.description}</p><p className="mt-1 text-xs text-slate-500">{line.material} · {lineProcessSummary(line)}</p></td><td className="p-3 text-slate-600">{line.quantity} {line.unit}</td><td className="p-3 text-right font-semibold">{money.format(sale)}</td></tr> })}</tbody></table></div>
           <div className="mt-7 ml-auto max-w-xs space-y-2 text-sm"><CostRow label="Imponibile" value={totals.sale} /><CostRow label={`IVA ${quote.vat}%`} value={totals.vatValue} /><div className="border-t border-[#0b3d45] pt-3"><div className="flex items-end justify-between"><span className="font-bold text-[#0b3d45]">Totale</span><span className="text-xl font-black text-[#0b3d45]">{money.format(totals.customerTotal)}</span></div></div></div>
           <div className="mt-10 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500"><p className="font-bold uppercase tracking-wide text-slate-700">Condizioni</p><p className="mt-1">Validità: {formatDate(quote.validUntil)}. Pagamento: {state.settings.paymentTerms}.</p><p>{state.settings.conditions} {quote.notes}</p></div>
         </div>

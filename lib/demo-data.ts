@@ -1,19 +1,49 @@
-import type { QuoteFlowState, QuoteLine } from "@/lib/quoteflow-types"
+import type { ProcessCategory, QuoteFlowState, QuoteLine, QuoteOperation } from "@/lib/quoteflow-types"
 
-const line = (overrides: Partial<QuoteLine> & Pick<QuoteLine, "id" | "description">): QuoteLine => ({
-  quantity: 1,
-  unit: "lotto",
-  material: "S235JR",
-  processes: "Taglio laser, piegatura",
-  materialCost: 680,
-  machineHours: 6,
-  machineRate: 68,
-  laborHours: 5,
-  laborRate: 42,
-  externalCost: 0,
-  extraCost: 45,
-  ...overrides,
-})
+const processCategory = (name: string): ProcessCategory => {
+  const value = name.toLowerCase()
+  if (/verniciatura|zincatura|anodizzazione|decapaggio|distensione/.test(value)) return "Esterna"
+  if (/saldatura|tig|mig|montaggio|finitura|satinatura/.test(value)) return "Manodopera"
+  return "Macchina"
+}
+
+const demoOperations = (source: Omit<QuoteLine, "operations">): QuoteOperation[] => {
+  const names = source.processes.split(",").map((name) => name.trim()).filter(Boolean)
+  const byCategory = (category: ProcessCategory) => names.filter((name) => processCategory(name) === category)
+  const operations: QuoteOperation[] = []
+  const addTimed = (category: "Macchina" | "Manodopera", hours: number, rate: number) => {
+    if (!hours) return
+    const matches = byCategory(category)
+    const labels = matches.length ? matches : [category === "Macchina" ? "Lavorazioni macchina" : "Manodopera"]
+    labels.forEach((name, index) => operations.push({ id: `${source.id}-${category}-${index}`, processId: "", name, category, unit: "€/h", quantity: hours / labels.length, rate }))
+  }
+  addTimed("Macchina", source.machineHours, source.machineRate)
+  addTimed("Manodopera", source.laborHours, source.laborRate)
+  if (source.externalCost) {
+    const matches = byCategory("Esterna")
+    const labels = matches.length ? matches : ["Lavorazioni esterne"]
+    labels.forEach((name, index) => operations.push({ id: `${source.id}-Esterna-${index}`, processId: "", name, category: "Esterna", unit: "€/lotto", quantity: 1, rate: source.externalCost / labels.length }))
+  }
+  return operations
+}
+
+const line = (overrides: Partial<QuoteLine> & Pick<QuoteLine, "id" | "description">): QuoteLine => {
+  const source: Omit<QuoteLine, "operations"> = {
+    quantity: 1,
+    unit: "lotto",
+    material: "S235JR",
+    processes: "Taglio laser, piegatura",
+    materialCost: 680,
+    machineHours: 6,
+    machineRate: 68,
+    laborHours: 5,
+    laborRate: 42,
+    externalCost: 0,
+    extraCost: 45,
+    ...overrides,
+  }
+  return { ...source, operations: overrides.operations ?? demoOperations(source) }
+}
 
 export const DEMO_STATE: QuoteFlowState = {
   clients: [
@@ -55,6 +85,7 @@ export const DEMO_STATE: QuoteFlowState = {
     { id: "p6", name: "Montaggio e finitura", category: "Manodopera", unit: "€/h", price: 42 },
     { id: "p7", name: "Verniciatura a polvere", category: "Esterna", unit: "€/lotto", price: 280 },
     { id: "p8", name: "Zincatura elettrolitica", category: "Esterna", unit: "€/lotto", price: 190 },
+    { id: "p9", name: "Satinatura inox", category: "Manodopera", unit: "€/h", price: 42 },
   ],
   settings: {
     companyName: "FerroLab Demo",
